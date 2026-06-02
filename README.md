@@ -107,45 +107,116 @@ sudo ln -s /opt/dhcp_manager/cli.py /usr/local/bin/dhcp-manager
 ./cli.py remove server1
 ```
 
-### Web Interface
 
-```bash
-# Start the web server
-./web.py
 
-# Or run with custom settings
-python3 web.py
+## Dynamic PXE/iPXE boot profiles
+
+The existing legacy PXELINUX feature remains the source of truth for classic PXE clients: selecting a Boot Device creates or updates a per-client symlink under `pxelinux.cfg/<IP_HEX>`.
+
+The iPXE layer mirrors the same Boot Device choice using generated IP-specific scripts. One GUI selection updates both worlds because the tool cannot know in advance whether a machine will boot as legacy PXE or iPXE.
+
+```text
+/var/lib/tftpboot/pxelinux.cfg/default          # existing PXELINUX menu
+/var/lib/tftpboot/pxelinux.cfg/centos-8.5      # auto-discovered GUI option
+/var/lib/tftpboot/pxelinux.cfg/debian          # auto-discovered GUI option
+/var/lib/tftpboot/pxelinux.cfg/hdd0            # auto-discovered once only
+/var/lib/tftpboot/pxelinux.cfg/hdd1            # auto-discovered once only
+/var/lib/tftpboot/pxelinux.cfg/C0A8010A -> centos-8.5
+
+/var/lib/tftpboot/ipxe/ipxe.ipxe               # main dispatcher handed to iPXE clients
+/var/lib/tftpboot/ipxe/default.ipxe            # optional default iPXE profile/menu
+/var/lib/tftpboot/ipxe/rocky-9.ipxe            # optional native iPXE profile/menu
+/var/lib/tftpboot/ipxe/clients/192.168.1.10.ipxe
 ```
 
-Then open your browser to: `http://your-server:5000`
+### iPXE flow
 
-### As a Systemd Service
+1. Normal PXE firmware receives `undionly.kpxe` for BIOS or `ipxe.efi` for UEFI.
+2. Once iPXE starts and asks DHCP again, DHCP gives it `ipxe/ipxe.ipxe`.
+3. `ipxe/ipxe.ipxe` runs `dhcp`, then tries the generated IP-specific script:
 
-Create `/etc/systemd/system/dhcp-manager-web.service`:
+   ```ipxe
+   chain --replace http://<dhcp-manager>:5000/ipxe/clients/${ip}.ipxe || goto try_default
+   chain --replace http://<dhcp-manager>:5000/ipxe/default.ipxe || goto local_disk
+   sanboot --no-describe --drive 0x80
+   ```
 
-```ini
-[Unit]
-Description=DHCP Manager Web Interface
-After=network.target
+4. If no IP/default iPXE file exists, the client boots local disk 0.
 
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/dhcp_manager
-ExecStart=/usr/bin/python3 /opt/dhcp_manager/web.py
-Restart=on-failure
-RestartSec=5
+### Dynamic Boot Device drop-down
 
-[Install]
-WantedBy=multi-user.target
+The web GUI discovers Boot Device choices dynamically from:
+
+- regular non-symlink files under `pxelinux.cfg`, for example `default`, `centos-8.5`, `debian`, `hdd0`, `hdd1`, `rocky-9`
+- regular top-level files under `ipxe`, for example `default.ipxe`, `rocky-9.ipxe`
+
+Generated client files under `ipxe/clients/` and PXELINUX IP symlinks are intentionally hidden. Local disk aliases are de-duplicated, so `hdd0` and `hdd1` appear once.
+
+### PXELINUX to iPXE translation
+
+When a selected Boot Device exists only as `pxelinux.cfg/<profile>`, DHCP Manager parses common PXELINUX Linux entries and generates an iPXE equivalent for the client. It reuses the same `KERNEL`/`LINUX`, `INITRD`, and `APPEND initrd=...` paths, loading them by TFTP. Native top-level `ipxe/<profile>.ipxe` files take precedence when present.
+
+Supported common PXELINUX shape:
+
+```text
+DEFAULT install
+LABEL install
+  KERNEL images/centos-8.5/vmlinuz
+  APPEND initrd=images/centos-8.5/initrd.img inst.repo=http://mirror/centos/8.5 quiet
 ```
 
-Enable and start:
+Useful translation commands:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable dhcp-manager-web
-sudo systemctl start dhcp-manager-web
+# Preview generated iPXE syntax from pxelinux.cfg/centos-8.5
+./cli.py ipxe translate centos-8.5
+
+# Write a reusable native profile to /var/lib/tftpboot/ipxe/centos-8.5.ipxe
+sudo ./cli.py ipxe translate centos-8.5 --write
+```
+
+### Configure iPXE support
+
+Edit `config.py`:
+
+```python
+IPXE_HTTP_BASE_URL = "http://<dhcp-manager-ip>:5000"
+```
+
+Install the main dispatcher into the TFTP iPXE directory:
+
+```bash
+sudo ./cli.py ipxe install-default
+```
+
+Print the DHCP snippet and paste it inside the relevant ISC DHCP `subnet` or `shared-network` block:
+
+```bash
+./cli.py ipxe snippet
+```
+
+Validate and restart DHCP:
+
+```bash
+sudo dhcpd -t -cf /etc/dhcp/dhcpd.conf
+sudo systemctl restart isc-dhcp-server
+```
+
+### Useful CLI commands
+
+```bash
+# Show dynamically discovered boot profiles
+./cli.py ipxe profiles
+
+# Set both legacy PXELINUX symlink and IP-specific iPXE override
+sudo ./cli.py boot 192.168.1.10 rocky-9
+
+# Create/update only the generated IP-specific iPXE file
+sudo ./cli.py ipxe set-client 192.168.1.10 rocky-9
+
+# List/remove generated iPXE client files
+./cli.py ipxe list-clients
+sudo ./cli.py ipxe delete-client 192.168.1.10
 ```
 
 ## 🔧 Configuration

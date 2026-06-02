@@ -6,7 +6,7 @@ import traceback
 from typing import Tuple, Any
 from functools import wraps
 import bcrypt
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, Response, send_file
 
 from config import config
 from managers.dhcp_manager import DHCPManager
@@ -154,6 +154,8 @@ def index():
                 # Also get the raw target for debugging
                 boot_target = pxe_mgr.get_boot_target(entry["ip"])
                 entry["boot_target"] = boot_target if boot_target else "No link configured"
+                entry["ipxe_url"] = pxe_mgr.get_dynamic_boot_url(entry["ip"])
+                entry["ipxe_mac_url"] = ""
                 
                 logger.debug(f"Entry {entry['hostname']} ({entry['ip']}): device={boot_device}, target={boot_target}")
                 
@@ -161,8 +163,11 @@ def index():
                 logger.error(f"Failed to get boot device for {entry['ip']}: {e}")
                 entry["boot_device"] = "default"
                 entry["boot_target"] = "Error reading boot config"
-    
-    return render_template("index.html", entries=entries, role=session.get("role"), username=session.get("username"))
+                entry["ipxe_url"] = ""
+                entry["ipxe_mac_url"] = ""
+
+    boot_profiles = pxe_mgr.discover_boot_profiles()
+    return render_template("index.html", entries=entries, boot_profiles=boot_profiles, role=session.get("role"), username=session.get("username"))
 
 
 @app.route("/add", methods=["GET", "POST"])
@@ -243,23 +248,39 @@ def delete_entry(identifier: str):
 @app.route("/bootdevice/<ip>", methods=["POST"])
 @require_admin
 def set_boot_device(ip: str):
-    """Set the PXE boot device for a client IP."""
+    """Set PXELINUX and iPXE boot profile for a client IP."""
     boot_device = request.form.get("boot_device", "").strip()
-    
+
     if not boot_device:
         flash("❌ Boot device not specified", "danger")
         return redirect(url_for("index"))
-    
-    success, result = safe_execute(
-        pxe_mgr.create_boot_link,
-        ip, boot_device
-    )
-    
-    if success:
-        flash(f"✅ Boot device updated for {ip} → {boot_device}", "success")
+
+    if not pxe_mgr.boot_profile_exists(boot_device):
+        flash(f"❌ Boot profile does not exist: {boot_device}", "danger")
+        return redirect(url_for("index"))
+
+    # Keep current feature working: update the legacy PXELINUX per-IP symlink.
+    success, result = safe_execute(pxe_mgr.create_boot_link, ip, boot_device)
+    if not success:
+        flash(f"❌ Failed to update PXELINUX boot device: {result}", "danger")
+        return redirect(url_for("index"))
+
+    # New feature: create generated iPXE file for this client by IP.
+    # Selecting default removes the IP override, so ipxe.ipxe falls through to
+    # ipxe/default.ipxe if present, otherwise local disk.
+    if boot_device == "default":
+        safe_execute(pxe_mgr.delete_client_ipxe_script, ip)
     else:
-        flash(f"❌ Failed to update boot device: {result}", "danger")
-    
+        script_success, script_result = safe_execute(
+            pxe_mgr.write_client_ipxe_scripts,
+            boot_device,
+            ip=ip,
+        )
+        if not script_success:
+            flash(f"⚠️ PXELINUX link was updated, but iPXE override creation failed: {script_result}", "warning")
+            return redirect(url_for("index"))
+
+    flash(f"✅ Boot profile updated for {ip} → {boot_device}", "success")
     return redirect(url_for("index"))
 
 
@@ -272,6 +293,9 @@ def query_boot(ip: str):
         device = pxe_mgr.get_boot_device(ip)
         hex_name = pxe_mgr.ip_to_hex(ip)
         link_path = pxe_mgr.get_link_path(ip)
+        ipxe_url = pxe_mgr.get_dynamic_boot_url(ip)
+        client_script_path = pxe_mgr.get_client_script_path(ip)
+        dispatcher_path = pxe_mgr.get_ipxe_script_path()
         
         if not target:
             target = "default (no assigned link file)"
@@ -282,6 +306,11 @@ def query_boot(ip: str):
             "link_path": str(link_path),
             "target": target,
             "device": device,
+            "ipxe_url": ipxe_url,
+            "ipxe_ip_script_path": str(client_script_path),
+            "ipxe_ip_script_exists": client_script_path.exists(),
+            "ipxe_dispatcher_path": str(dispatcher_path),
+            "ipxe_dispatcher_tftp": pxe_mgr.get_ipxe_script_tftp_filename(),
             "link_exists": link_path.exists(),
             "success": True
         })
@@ -294,6 +323,59 @@ def query_boot(ip: str):
             "success": False,
             "error": str(e)
         }), 500
+
+
+# ============================================================
+#                   ROUTES - iPXE DISPATCHER
+# ============================================================
+
+@app.route("/ipxe/boot")
+def ipxe_boot_auto():
+    """Backward-compatible endpoint: return the default dispatcher script."""
+    return Response(pxe_mgr.generate_default_ipxe_script(), mimetype="text/plain")
+
+
+@app.route("/ipxe/install-default", methods=["POST"])
+@require_admin
+def ipxe_install_default():
+    """Generate/install ipxe/ipxe.ipxe into the TFTP root."""
+    success, result = safe_execute(pxe_mgr.write_default_ipxe_script)
+    if success:
+        flash(f"✅ Installed iPXE dispatcher: {result}", "success")
+    else:
+        flash(f"❌ Failed to install iPXE dispatcher: {result}", "danger")
+    return redirect(url_for("index"))
+
+
+@app.route("/ipxe/<path:filename>")
+def ipxe_static_script(filename: str):
+    """Serve iPXE scripts from <tftp-root>/ipxe.
+
+    Missing per-client scripts intentionally return 404 so ipxe.ipxe can try the
+    next lookup target and eventually boot local disk.
+    """
+    if not filename.endswith(".ipxe"):
+        return Response("Not found\n", mimetype="text/plain", status=404)
+
+    # Safe path resolution inside the configured iPXE directory.
+    try:
+        requested = (pxe_mgr.ipxe_dir / filename).resolve()
+        root = pxe_mgr.ipxe_dir.resolve()
+        if root not in requested.parents and requested != root:
+            return Response("Not found\n", mimetype="text/plain", status=404)
+    except Exception:
+        return Response("Not found\n", mimetype="text/plain", status=404)
+
+    if not requested.exists() or not requested.is_file():
+        return Response("Not found\n", mimetype="text/plain", status=404)
+    return send_file(requested, mimetype="text/plain")
+
+
+@app.route("/ipxe/snippet")
+@require_admin
+def ipxe_dhcp_snippet():
+    """Display the ISC DHCP snippet needed to enable iPXE dispatching."""
+    return Response(pxe_mgr.generate_isc_dhcp_ipxe_snippet(), mimetype="text/plain")
 
 
 # ============================================================
