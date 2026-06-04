@@ -141,3 +141,37 @@ def test_discovery_does_not_duplicate_local_disk_aliases(tmp_path: Path):
     assert keys.count("hdd1") == 1
     assert "hd0" not in keys
     assert "hd1" not in keys
+
+
+def test_local_boot_pxelinux_profiles_generate_ipxe_without_translation_error(tmp_path: Path):
+    pxe_dir = tmp_path / "pxelinux.cfg"
+    pxe_dir.mkdir()
+    (pxe_dir / "boot_local_hdd0").write_text("LOCALBOOT 0\n")
+    (pxe_dir / "boot_local_hdd1").write_text("LOCALBOOT 1\n")
+    (pxe_dir / "boot_local_usb").write_text("LOCALBOOT 0\n")
+
+    mgr = PXEBootManager(tftp_dir=pxe_dir)
+
+    hdd0_script = mgr.write_client_ipxe_script("192.168.1.10", "boot_local_hdd0").read_text()
+    assert "sanboot --no-describe --drive 0x80" in hdd0_script
+
+    hdd1_script = mgr.write_client_ipxe_script("192.168.1.10", "boot_local_hdd1").read_text()
+    assert "sanboot --no-describe --drive 0x81" in hdd1_script
+
+    usb_script = mgr.write_client_ipxe_script("192.168.1.10", "boot_local_usb").read_text()
+    assert "Returning to firmware boot order" in usb_script
+    assert "sanboot --no-describe --drive" not in usb_script
+
+
+def test_translator_handles_named_local_boot_profiles(tmp_path: Path):
+    pxe_dir = tmp_path / "pxelinux.cfg"
+    pxe_dir.mkdir()
+    (pxe_dir / "boot_local_hdd0").write_text("LOCALBOOT 0\n")
+    (pxe_dir / "boot_local_hdd1").write_text("LOCALBOOT 1\n")
+    (pxe_dir / "boot_local_usb").write_text("LOCALBOOT 0\n")
+
+    mgr = PXEBootManager(tftp_dir=pxe_dir)
+
+    assert "sanboot --no-describe --drive 0x80" in mgr.translate_pxelinux_profile_to_ipxe("boot_local_hdd0")
+    assert "sanboot --no-describe --drive 0x81" in mgr.translate_pxelinux_profile_to_ipxe("boot_local_hdd1")
+    assert "Returning to firmware boot order" in mgr.translate_pxelinux_profile_to_ipxe("boot_local_usb")

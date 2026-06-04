@@ -56,6 +56,24 @@ class PXEBootManager:
         ),
         "hdd0": BootProfile(key="hdd0", label="Local disk 0", source="builtin", description="Boot first local disk."),
         "hdd1": BootProfile(key="hdd1", label="Local disk 1", source="builtin", description="Boot second local disk."),
+        "boot_local_hdd0": BootProfile(
+            key="boot_local_hdd0",
+            label="Boot local HDD 0",
+            source="builtin",
+            description="Boot first local disk using iPXE sanboot drive 0x80.",
+        ),
+        "boot_local_hdd1": BootProfile(
+            key="boot_local_hdd1",
+            label="Boot local HDD 1",
+            source="builtin",
+            description="Boot second local disk using iPXE sanboot drive 0x81.",
+        ),
+        "boot_local_usb": BootProfile(
+            key="boot_local_usb",
+            label="Boot local USB / next firmware device",
+            source="builtin",
+            description="Exit iPXE and return to firmware boot order, useful for USB/local fallback.",
+        ),
     }
 
     LEGACY_ALIAS_TARGETS: Dict[str, str] = {
@@ -64,6 +82,16 @@ class PXEBootManager:
         "hd1": config.PXE_DISK1_MENU,
         "hdd0": config.PXE_DISK0_MENU,
         "hdd1": config.PXE_DISK1_MENU,
+    }
+
+    IPXE_LOCAL_BOOT_PROFILES: Dict[str, str] = {
+        "hd0": "hdd0",
+        "hdd0": "hdd0",
+        "boot_local_hdd0": "hdd0",
+        "hd1": "hdd1",
+        "hdd1": "hdd1",
+        "boot_local_hdd1": "hdd1",
+        "boot_local_usb": "usb",
     }
 
     def __init__(self, tftp_dir: Optional[Path] = None):
@@ -222,7 +250,16 @@ class PXEBootManager:
         return path.name.startswith(".") or path.name.endswith("~")
 
     def _profile_sort_key(self, item: BootProfile) -> tuple:
-        priority = {"default": 0, "hdd0": 1, "hd0": 1, "hdd1": 2, "hd1": 2}.get(item.key, 10)
+        priority = {
+            "default": 0,
+            "hdd0": 1,
+            "hd0": 1,
+            "hdd1": 2,
+            "hd1": 2,
+            "boot_local_hdd0": 3,
+            "boot_local_hdd1": 4,
+            "boot_local_usb": 5,
+        }.get(item.key, 10)
         return (priority, item.key.lower())
 
     def discover_boot_profiles(self) -> List[Dict[str, str]]:
@@ -577,8 +614,16 @@ class PXEBootManager:
             "",
         ]
 
-        if localboot or kernel.lower() in {"localboot", "localboot.c32", "chain.c32"}:
-            drive = "0x81" if profile in {"hd1", "hdd1"} or localboot == "1" else "0x80"
+        local_boot_target = self.IPXE_LOCAL_BOOT_PROFILES.get(profile)
+
+        if local_boot_target == "hdd0":
+            lines.extend(["sanboot --no-describe --drive 0x80 || goto failed", "exit 0"])
+        elif local_boot_target == "hdd1":
+            lines.extend(["sanboot --no-describe --drive 0x81 || goto failed", "exit 0"])
+        elif local_boot_target == "usb":
+            lines.extend(["echo Returning to firmware boot order...", "exit 0"])
+        elif localboot or kernel.lower() in {"localboot", "localboot.c32", "chain.c32"}:
+            drive = "0x81" if localboot == "1" else "0x80"
             lines.extend([f"sanboot --no-describe --drive {drive} || goto failed", "exit 0"])
         elif not kernel:
             raise PXEBootError(f"Cannot translate PXELINUX profile {profile}: no KERNEL/LINUX directive found")
@@ -620,10 +665,25 @@ class PXEBootManager:
             "",
         ]
 
-        if profile in {"hd0", "hdd0"}:
-            lines.extend(["echo Booting first local disk...", "sanboot --no-describe --drive 0x80 || goto failed", "exit 0"])
-        elif profile in {"hd1", "hdd1"}:
-            lines.extend(["echo Booting second local disk...", "sanboot --no-describe --drive 0x81 || goto failed", "exit 0"])
+        local_boot_target = self.IPXE_LOCAL_BOOT_PROFILES.get(profile)
+
+        if local_boot_target == "hdd0":
+            lines.extend([
+                "echo Booting first local disk...",
+                "sanboot --no-describe --drive 0x80 || goto failed",
+                "exit 0",
+            ])
+        elif local_boot_target == "hdd1":
+            lines.extend([
+                "echo Booting second local disk...",
+                "sanboot --no-describe --drive 0x81 || goto failed",
+                "exit 0",
+            ])
+        elif local_boot_target == "usb":
+            lines.extend([
+                "echo Returning to firmware boot order for USB/local boot...",
+                "exit 0",
+            ])
         elif profile == "default":
             lines.extend(
                 [
