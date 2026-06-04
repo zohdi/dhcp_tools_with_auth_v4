@@ -56,18 +56,6 @@ class PXEBootManager:
         ),
         "hdd0": BootProfile(key="hdd0", label="Local disk 0", source="builtin", description="Boot first local disk."),
         "hdd1": BootProfile(key="hdd1", label="Local disk 1", source="builtin", description="Boot second local disk."),
-        "boot_local_hdd0": BootProfile(
-            key="boot_local_hdd0",
-            label="Boot local HDD 0",
-            source="builtin",
-            description="Boot first local disk using iPXE sanboot drive 0x80.",
-        ),
-        "boot_local_hdd1": BootProfile(
-            key="boot_local_hdd1",
-            label="Boot local HDD 1",
-            source="builtin",
-            description="Boot second local disk using iPXE sanboot drive 0x81.",
-        ),
         "boot_local_usb": BootProfile(
             key="boot_local_usb",
             label="Boot local USB / next firmware device",
@@ -88,10 +76,23 @@ class PXEBootManager:
         "hd0": "hdd0",
         "hdd0": "hdd0",
         "boot_local_hdd0": "hdd0",
+        "default_local_disk0": "hdd0",
         "hd1": "hdd1",
         "hdd1": "hdd1",
         "boot_local_hdd1": "hdd1",
+        "default_local_disk1": "hdd1",
         "boot_local_usb": "usb",
+    }
+
+    # These are implementation aliases for legacy PXELINUX local boot files.
+    # The GUI should show one clean option per action: Local disk 0/1.
+    DISCOVERY_HIDDEN_LOCAL_ALIASES = {
+        "hd0",
+        "hd1",
+        "boot_local_hdd0",
+        "boot_local_hdd1",
+        config.PXE_DISK0_MENU,
+        config.PXE_DISK1_MENU,
     }
 
     def __init__(self, tftp_dir: Optional[Path] = None):
@@ -283,6 +284,8 @@ class PXEBootManager:
                     key = self.validate_boot_profile(path.name)
                 except ValidationError:
                     self.logger.warning("Skipping unsafe PXELINUX menu filename: %s", path.name)
+                    continue
+                if key in self.DISCOVERY_HIDDEN_LOCAL_ALIASES:
                     continue
                 profiles[key] = BootProfile(key=key, label=key, source="pxelinux", path=str(path))
 
