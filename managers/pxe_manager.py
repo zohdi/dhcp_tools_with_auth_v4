@@ -56,12 +56,6 @@ class PXEBootManager:
         ),
         "hdd0": BootProfile(key="hdd0", label="Local disk 0", source="builtin", description="Boot first local disk."),
         "hdd1": BootProfile(key="hdd1", label="Local disk 1", source="builtin", description="Boot second local disk."),
-        "boot_local_usb": BootProfile(
-            key="boot_local_usb",
-            label="Boot local USB / next firmware device",
-            source="builtin",
-            description="Exit iPXE and return to firmware boot order, useful for USB/local fallback.",
-        ),
     }
 
     LEGACY_ALIAS_TARGETS: Dict[str, str] = {
@@ -91,6 +85,7 @@ class PXEBootManager:
         "hd1",
         "boot_local_hdd0",
         "boot_local_hdd1",
+        "boot_local_usb",
         config.PXE_DISK0_MENU,
         config.PXE_DISK1_MENU,
     }
@@ -259,7 +254,7 @@ class PXEBootManager:
             "hd1": 2,
             "boot_local_hdd0": 3,
             "boot_local_hdd1": 4,
-            "boot_local_usb": 5,
+            "boot_local_usb": 99,
         }.get(item.key, 10)
         return (priority, item.key.lower())
 

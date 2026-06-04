@@ -266,19 +266,16 @@ def set_boot_device(ip: str):
         return redirect(url_for("index"))
 
     # New feature: create generated iPXE file for this client by IP.
-    # Selecting default removes the IP override, so ipxe.ipxe falls through to
-    # ipxe/default.ipxe if present, otherwise local disk.
-    if boot_device == "default":
-        safe_execute(pxe_mgr.delete_client_ipxe_script, ip)
-    else:
-        script_success, script_result = safe_execute(
-            pxe_mgr.write_client_ipxe_scripts,
-            boot_device,
-            ip=ip,
-        )
-        if not script_success:
-            flash(f"⚠️ PXELINUX link was updated, but iPXE override creation failed: {script_result}", "warning")
-            return redirect(url_for("index"))
+    # Even `default` gets a generated client file, so the iPXE status stays
+    # explicit and the selected GUI profile applies to both PXELINUX and iPXE.
+    script_success, script_result = safe_execute(
+        pxe_mgr.write_client_ipxe_scripts,
+        boot_device,
+        ip=ip,
+    )
+    if not script_success:
+        flash(f"⚠️ PXELINUX link was updated, but iPXE override creation failed: {script_result}", "warning")
+        return redirect(url_for("index"))
 
     flash(f"✅ Boot profile updated for {ip} → {boot_device}", "success")
     return redirect(url_for("index"))

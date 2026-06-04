@@ -91,6 +91,16 @@ def test_client_specific_script_roundtrip_for_ip_only(tmp_path: Path):
     assert not ip_path.exists()
 
 
+def test_default_profile_writes_explicit_client_ipxe_script(tmp_path: Path):
+    mgr = PXEBootManager(tftp_dir=tmp_path / "pxelinux.cfg")
+    path = mgr.write_client_ipxe_script("192.168.1.50", "default")
+    script = path.read_text()
+    assert path == tmp_path / "ipxe" / "clients" / "192.168.1.50.ipxe"
+    assert "Using default dispatcher behavior" in script
+    assert "/ipxe/default.ipxe" in script
+    assert "sanboot --no-describe --drive 0x80" in script
+
+
 def test_generated_client_script_can_chain_ipxe_profile(tmp_path: Path):
     pxe_dir = tmp_path / "pxelinux.cfg"
     ipxe_dir = tmp_path / "ipxe"
@@ -135,12 +145,14 @@ def test_discovery_does_not_duplicate_local_disk_aliases(tmp_path: Path):
     pxe_dir.mkdir()
     (pxe_dir / "hdd0").write_text("local disk menu")
     (pxe_dir / "hdd1").write_text("local disk menu")
+    (pxe_dir / "boot_local_usb").write_text("local boot usb menu")
     mgr = PXEBootManager(tftp_dir=pxe_dir)
     keys = [p["key"] for p in mgr.discover_boot_profiles()]
     assert keys.count("hdd0") == 1
     assert keys.count("hdd1") == 1
     assert "hd0" not in keys
     assert "hd1" not in keys
+    assert "boot_local_usb" not in keys
 
 
 def test_local_boot_pxelinux_profiles_generate_ipxe_without_translation_error(tmp_path: Path):
