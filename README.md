@@ -442,3 +442,21 @@ ls -l | grep -E '^l'
 ---
 
 **For questions or issues, please open a GitHub issue or contact the maintainers.**
+
+## First-run Setup Wizard
+
+This package includes a first-run setup wizard for fresh installations. On a new host, run:
+
+```bash
+sudo python3 web.py
+```
+
+Then open the web UI on port `5000`. If DHCP/TFTP/PXE setup is not completed, the app redirects to `/setup/checks` instead of the login page. The wizard can install required packages, configure the DHCP interface, generate DHCP/TFTP config, copy PXELINUX files, and create the default TFTP tree.
+
+For development without system setup redirection:
+
+```bash
+DHCP_MANAGER_SKIP_SETUP=1 python3 web.py
+```
+
+See `SETUP_WIZARD.md` for details.

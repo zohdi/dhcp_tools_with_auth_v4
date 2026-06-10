@@ -1,0 +1,44 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="card shadow-sm border-0">
+  <div class="card-body">
+    <h3 class="mb-3">Review before apply</h3>
+    <p class="text-muted">No changes are written until you press Apply.</p>
+
+    {% for warning in prepared.warnings %}
+      <div class="alert alert-warning">{{ warning }}</div>
+    {% endfor %}
+
+    <h5>Summary</h5>
+    <table class="table table-sm">
+      <tr><th>DHCP interface</th><td><code>{{ prepared.interface }}</code></td></tr>
+      <tr><th>Managed network</th><td><code>{{ prepared.managed_network }}</code></td></tr>
+      <tr><th>DHCP range</th><td><code>{{ prepared.range_start }} - {{ prepared.range_end }}</code></td></tr>
+      <tr><th>Next server</th><td><code>{{ prepared.next_server }}</code></td></tr>
+      <tr><th>Boot filename</th><td><code>{{ prepared.boot_filename }}</code></td></tr>
+      <tr><th>iPXE dispatcher</th><td><code>{{ prepared.ipxe_dispatcher }}</code></td></tr>
+      <tr><th>TFTP root</th><td><code>{{ prepared.tftp_root }}</code></td></tr>
+    </table>
+
+    <h5 class="mt-4">/etc/dhcp/dhcpd.conf</h5>
+    <pre class="bg-dark text-light p-3 rounded small" style="white-space: pre-wrap; max-height: 350px; overflow:auto;">{{ prepared.dhcp_conf }}</pre>
+
+    <h5 class="mt-4">/etc/default/isc-dhcp-server</h5>
+    <pre class="bg-dark text-light p-3 rounded small">{{ prepared.dhcp_defaults }}</pre>
+
+    <h5 class="mt-4">/etc/default/tftpd-hpa</h5>
+    <pre class="bg-dark text-light p-3 rounded small">{{ prepared.tftpd_defaults }}</pre>
+
+    <div class="alert alert-info">
+      The wizard will back up existing config files under <code>/var/backups/dhcp-manager</code>, create the TFTP tree, copy PXELINUX/iPXE bootloader files when found, install the iPXE dispatcher, validate DHCP syntax, and restart DHCP/TFTP services.
+    </div>
+
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary" href="{{ url_for('setup_config') }}">Back</a>
+      <form method="POST" action="{{ url_for('setup_apply') }}">
+        <button class="btn btn-success" type="submit">Apply setup</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

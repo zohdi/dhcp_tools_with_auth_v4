@@ -13,6 +13,7 @@ from managers.dhcp_manager import DHCPManager
 from managers.pxe_manager import PXEBootManager
 from exceptions import DHCPManagerError, PXEBootError
 from utils.logger import get_logger
+from setup_wizard import SetupManager, SetupValidationError
 
 
 # Initialize Flask app
@@ -23,6 +24,7 @@ app.secret_key = config.FLASK_SECRET_KEY
 dhcp_mgr = DHCPManager()
 pxe_mgr = PXEBootManager()
 logger = get_logger("dhcp-web")
+setup_mgr = SetupManager()
 
 
 # ============================================================
@@ -64,6 +66,94 @@ def safe_execute(func, *args, **kwargs) -> Tuple[bool, Any]:
         return False, str(e)
 
 
+
+
+# ============================================================
+#                   FIRST-RUN SETUP WIZARD
+# ============================================================
+
+SETUP_ALLOWED_ENDPOINTS = {
+    "setup_index",
+    "setup_checks",
+    "setup_config",
+    "setup_review",
+    "setup_apply",
+    "static",
+}
+
+
+@app.before_request
+def enforce_first_run_setup():
+    """Redirect first-time/fresh installs to setup before showing login."""
+    endpoint = request.endpoint or ""
+    if endpoint in SETUP_ALLOWED_ENDPOINTS or endpoint.startswith("setup_"):
+        return None
+    if not setup_mgr.setup_completed():
+        return redirect(url_for("setup_checks"))
+    return None
+
+
+@app.route("/setup")
+def setup_index():
+    return redirect(url_for("setup_checks"))
+
+
+@app.route("/setup/checks")
+def setup_checks():
+    status = setup_mgr.status()
+    return render_template("setup_checks.html", status=status)
+
+
+@app.route("/setup/config", methods=["GET", "POST"])
+def setup_config():
+    status = setup_mgr.status()
+    form_data = setup_mgr.default_form_data()
+    if request.method == "POST":
+        form_data.update({key: request.form.get(key, "") for key in form_data.keys()})
+        form_data["install_packages"] = "yes" if request.form.get("install_packages") == "yes" else "no"
+        try:
+            prepared = setup_mgr.validate_and_prepare(form_data)
+            session["setup_prepared"] = setup_mgr.serialize_for_session(prepared)
+            return redirect(url_for("setup_review"))
+        except SetupValidationError as exc:
+            flash(f"❌ {exc}", "danger")
+        except Exception as exc:
+            logger.error(f"Setup validation failed: {exc}")
+            flash(f"❌ Setup validation failed: {exc}", "danger")
+    return render_template("setup_config.html", status=status, form=form_data)
+
+
+@app.route("/setup/review", methods=["GET", "POST"])
+def setup_review():
+    prepared_session = session.get("setup_prepared")
+    if not prepared_session:
+        flash("⚠️ Setup data expired. Please fill the setup form again.", "warning")
+        return redirect(url_for("setup_config"))
+    try:
+        prepared = setup_mgr.deserialize_from_session(prepared_session)
+    except Exception as exc:
+        flash(f"❌ Setup data is no longer valid: {exc}", "danger")
+        return redirect(url_for("setup_config"))
+    return render_template("setup_review.html", prepared=prepared, session_data=prepared_session)
+
+
+@app.route("/setup/apply", methods=["POST"])
+def setup_apply():
+    prepared_session = session.get("setup_prepared")
+    if not prepared_session:
+        flash("⚠️ Setup data expired. Please fill the setup form again.", "warning")
+        return redirect(url_for("setup_config"))
+    try:
+        prepared = setup_mgr.deserialize_from_session(prepared_session)
+        logs = setup_mgr.apply(prepared)
+        session.pop("setup_prepared", None)
+        flash("✅ First-run setup completed. You can log in now.", "success")
+        return render_template("setup_done.html", logs=logs)
+    except Exception as exc:
+        tb = traceback.format_exc()
+        logger.error(f"Setup apply failed:\n{tb}")
+        flash(f"❌ Setup failed: {exc}", "danger")
+        return redirect(url_for("setup_review"))
 
 
 # ============================================================

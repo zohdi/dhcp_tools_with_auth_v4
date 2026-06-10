@@ -1,0 +1,42 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="card shadow-sm border-0">
+  <div class="card-body">
+    <h3 class="mb-3">First-run setup</h3>
+    <p class="text-muted">DHCP Manager detected that setup is not completed yet. Review the host status before continuing.</p>
+
+    {% if not status.running_as_root %}
+      <div class="alert alert-warning">
+        <strong>Root required:</strong> package installation and writing <code>/etc</code> configs require root.
+        Start with <code>sudo python3 web.py</code> for the first setup run.
+      </div>
+    {% endif %}
+
+    {% for warning in status.warnings %}
+      <div class="alert alert-warning">{{ warning }}</div>
+    {% endfor %}
+
+    <table class="table table-sm align-middle">
+      <tr><th>Detected OS</th><td>{{ status.os_name }}</td></tr>
+      <tr><th>Package manager</th><td>{{ status.package_manager }}</td></tr>
+      <tr><th>DHCP package</th><td>{% if status.dhcp_package_installed %}<span class="badge bg-success">installed</span>{% else %}<span class="badge bg-danger">missing</span>{% endif %}</td></tr>
+      <tr><th>TFTP package</th><td>{% if status.tftp_package_installed %}<span class="badge bg-success">installed</span>{% else %}<span class="badge bg-danger">missing</span>{% endif %}</td></tr>
+      <tr><th>Syslinux/PXELINUX package</th><td>{% if status.syslinux_package_installed %}<span class="badge bg-success">installed</span>{% else %}<span class="badge bg-danger">missing</span>{% endif %}</td></tr>
+    </table>
+
+    <h5 class="mt-4">Network interfaces</h5>
+    <table class="table table-sm">
+      <thead><tr><th>Interface</th><th>IPv4</th><th>Network</th><th>State</th></tr></thead>
+      <tbody>
+      {% for iface in status.interfaces %}
+        <tr><td><code>{{ iface.name }}</code></td><td>{{ iface.ipv4 or '-' }}</td><td>{{ iface.network or '-' }}</td><td>{{ iface.state }}</td></tr>
+      {% else %}
+        <tr><td colspan="4" class="text-muted">No non-loopback interfaces detected.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+
+    <a class="btn btn-primary" href="{{ url_for('setup_config') }}">Next: configure DHCP/TFTP</a>
+  </div>
+</div>
+{% endblock %}

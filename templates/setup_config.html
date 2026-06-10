@@ -1,0 +1,71 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="card shadow-sm border-0">
+  <div class="card-body">
+    <h3 class="mb-3">Configure DHCP/TFTP</h3>
+    <p class="text-muted">Choose the DHCP interface and PXE subnet details. The next step will show a preview before anything is applied.</p>
+
+    <form method="POST">
+      <div class="form-check form-switch mb-3">
+        <input class="form-check-input" type="checkbox" id="install_packages" name="install_packages" value="yes" {% if form.install_packages == 'yes' %}checked{% endif %}>
+        <label class="form-check-label" for="install_packages">Install missing DHCP/TFTP/PXE packages automatically</label>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">DHCP interface</label>
+        <input name="interface" list="interfaces" class="form-control" value="{{ form.interface }}" placeholder="e.g. enp3s0">
+        <datalist id="interfaces">
+          {% for iface in status.interfaces %}
+            <option value="{{ iface.name }}">{{ iface.name }}{% if iface.ipv4 %} — {{ iface.ipv4 }} / {{ iface.network }}{% endif %}</option>
+          {% endfor %}
+        </datalist>
+        <small class="text-muted">The wizard writes this to <code>/etc/default/isc-dhcp-server</code> as <code>INTERFACESv4</code>.</small>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label">Managed subnet</label>
+          <input name="managed_subnet" class="form-control" value="{{ form.managed_subnet }}" placeholder="192.168.33.0">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Netmask or prefix</label>
+          <input name="netmask" class="form-control" value="{{ form.netmask }}" placeholder="255.255.255.0 or 24">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">DHCP range start</label>
+          <input name="range_start" class="form-control" value="{{ form.range_start }}" placeholder="192.168.33.100">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">DHCP range end</label>
+          <input name="range_end" class="form-control" value="{{ form.range_end }}" placeholder="192.168.33.200">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Router/gateway</label>
+          <input name="router" class="form-control" value="{{ form.router }}" placeholder="192.168.33.1">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">DNS servers</label>
+          <input name="dns_servers" class="form-control" value="{{ form.dns_servers }}" placeholder="8.8.8.8, 1.1.1.1">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Next server</label>
+          <input name="next_server" class="form-control" value="{{ form.next_server }}" placeholder="PXE/TFTP server IP">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Boot filename</label>
+          <input name="boot_filename" class="form-control" value="{{ form.boot_filename }}" placeholder="pxelinux.0">
+        </div>
+        <div class="col-md-12">
+          <label class="form-label">TFTP root path</label>
+          <input name="tftp_root" class="form-control" value="{{ form.tftp_root }}" placeholder="/var/lib/tftpboot">
+        </div>
+      </div>
+
+      <div class="mt-4 d-flex gap-2">
+        <a class="btn btn-outline-secondary" href="{{ url_for('setup_checks') }}">Back</a>
+        <button class="btn btn-primary" type="submit">Preview configuration</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
