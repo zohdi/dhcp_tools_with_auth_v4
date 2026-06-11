@@ -425,7 +425,7 @@ class SetupManager:
             self.run(["apt", "update"], "Update apt package index", check=True)
             self.run(["apt", "install", "-y"] + self.DEBIAN_PACKAGES, "Install DHCP/TFTP/PXE packages", check=True)
         elif package_manager in {"dnf", "yum"}:
-            cmd = [package_manager, "install", "-y"] + self.RHEL_PACKAGES
+            cmd = [package_manager, "install", "-y", "--releasever=9" ] + self.RHEL_PACKAGES
             self.run(cmd, "Install DHCP/TFTP/PXE packages", check=True)
         else:
             raise RuntimeError(f"Unsupported package manager: {package_manager}")
