@@ -1,181 +1,326 @@
-# DHCP Manager - Refactored Version
+# DHCP Manager
 
-A professional, production-ready DHCP server management tool with PXE boot support.
+A Python-based DHCP reservation manager with a Flask web UI, first-run setup wizard, and PXE/iPXE boot profile support.
 
-## 🎯 Overview
+The project manages ISC DHCP configuration, DHCP host reservations, classic PXELINUX profiles, and generated iPXE client scripts from one place.
 
-This refactored version eliminates all external script dependencies and provides a clean, modular Python codebase for managing ISC DHCP server configurations and PXE boot settings.
+---
 
-## ✨ Key Improvements
+## Features
 
-### Eliminated External Dependencies
-- ✅ **`convert.sh`** → Replaced with `PXEBootManager.ip_to_hex()` and `hex_to_ip()`
-- ✅ **`manage_links_from_ip.py`** → Integrated into `PXEBootManager` class
+- Web interface for managing DHCP reservations
+- CLI for listing, adding, modifying, querying, and removing reservations
+- First-run setup wizard for DHCP, TFTP, and PXE bootstrap configuration
+- PXELINUX support using per-client `pxelinux.cfg/<IP_HEX>` links
+- iPXE dispatcher support using per-client scripts under `ipxe/clients/`
+- Dynamic Boot Device discovery from PXELINUX and iPXE profiles
+- PXELINUX-to-iPXE translation for common Linux installer entries
+- Centralized configuration in `config.py`
+- Input validation, custom exceptions, structured logging, and unit tests
 
-### Code Quality Enhancements
-- ✅ **Removed duplication** - Consolidated `colors.py` and `logger.py`
-- ✅ **Type hints** - Added throughout for better IDE support
-- ✅ **Custom exceptions** - Specific error types for better error handling
-- ✅ **Validators module** - Centralized input validation
-- ✅ **Configuration module** - Single source of truth for all settings
-- ✅ **Comprehensive logging** - Better debugging and audit trail
-- ✅ **Unit tests** - Comprehensive test coverage
+---
 
-### Architecture Improvements
-- ✅ **Separation of concerns** - Clear module boundaries
-- ✅ **Single Responsibility Principle** - Each class has one job
-- ✅ **Dependency Injection** - Easier testing and configuration
-- ✅ **Error handling** - Graceful degradation and rollback
+## Project Structure
 
-## 📁 Project Structure
-
-```
+```text
 dhcp_manager/
 ├── config.py                    # Centralized configuration
 ├── exceptions.py                # Custom exception classes
-│
-├── utils/                       # Utility modules
-│   ├── __init__.py
-│   ├── colors.py               # Terminal colors
-│   ├── logger.py               # Logging setup
-│   └── validators.py           # Input validation
-│
-├── managers/                    # Core business logic
-│   ├── __init__.py
-│   ├── dhcp_manager.py         # DHCP configuration management
-│   └── pxe_manager.py          # PXE boot management
-│
 ├── cli.py                       # Command-line interface
 ├── web.py                       # Flask web interface
 │
-├── templates/                   # HTML templates
+├── setup_wizard/                # First-run DHCP/TFTP/PXE setup wizard
+│   ├── __init__.py
+│   ├── files/
+│   └── manager.py
+│
+├── managers/
+│   ├── __init__.py
+│   ├── dhcp_manager.py          # DHCP configuration management
+│   └── pxe_manager.py           # PXE/iPXE boot management
+│
+├── utils/
+│   ├── __init__.py
+│   ├── colors.py
+│   ├── logger.py
+│   └── validators.py
+│
+├── templates/
 │   ├── layout.html
 │   ├── index.html
 │   └── add_edit.html
 │
-└── tests/                       # Unit tests
+└── tests/
     ├── __init__.py
     └── test_dhcp_manager.py
 ```
 
-## 🚀 Installation
+---
 
-### Prerequisites
+## Installation
+
+### 1. Install system packages
+
+Ubuntu/Debian:
 
 ```bash
-# Install required packages
 sudo apt-get update
-sudo apt-get install -y isc-dhcp-server bind9 python3 python3-pip
-
-# Install Python dependencies
-pip3 install flask
+sudo apt-get install -y isc-dhcp-server tftpd-hpa syslinux-common pxelinux python3 python3-pip
 ```
 
-### Setup
+Rocky/RHEL/Fedora:
 
 ```bash
-# Clone or copy the project
+sudo dnf install -y dhcp-server --releasever=9 # If using higher version since dhcp-server is deprecated 
+sudo dnf install tftp-server syslinux-tftpboot python3 python3-pip
+```
+
+> Note: `syslinux-tftpboot` provides PXELINUX/Syslinux files such as `pxelinux.0`, `menu.c32`, `ldlinux.c32`, and related `.c32` modules. It does not provide iPXE binaries such as `undionly.kpxe`, `ipxe.efi`, or `snponly.efi`.
+
+### 2. Clone the project
+
+Main branch:
+
+```bash
 cd /opt
-git clone <your-repo> dhcp_manager
-cd dhcp_manager
+sudo git clone https://github.com/zohdi/dhcp_tools_with_auth_v4.git dhcp_manager
+cd /opt/dhcp_manager
+```
 
-# Make CLI executable
-chmod +x cli.py web.py
+Autodeploy branch:
 
-# Optional: Create symlink for easy access
+```bash
+cd /opt
+sudo git clone -b autodeploy_web_dhcp https://github.com/zohdi/dhcp_tools_with_auth_v4.git dhcp_manager
+cd /opt/dhcp_manager
+```
+
+### 3. Install Python dependencies
+
+```bash
+sudo pip3 install flask bcrypt
+```
+
+### 4. Make scripts executable
+
+```bash
+sudo chmod +x cli.py web.py
+```
+
+Optional CLI symlink:
+
+```bash
 sudo ln -s /opt/dhcp_manager/cli.py /usr/local/bin/dhcp-manager
 ```
 
-## 📖 Usage
+---
 
-### Command-Line Interface
+## First-Run Setup Wizard
+
+Start the web app:
+
+```bash
+sudo python3 web.py
+```
+
+Open:
+
+```text
+http://<dhcp-manager-ip>:5000
+```
+
+On a fresh host, the app redirects to:
+
+```text
+/setup/checks
+```
+
+The wizard can:
+
+- install required DHCP/TFTP/PXE packages
+- select and configure the DHCP interface
+- generate DHCP configuration
+- configure TFTP
+- copy required PXELINUX/Syslinux files
+- create the default TFTP/PXE directory structure
+- install iPXE dispatcher support where configured
+
+For development without setup redirection:
+
+```bash
+DHCP_MANAGER_SKIP_SETUP=1 python3 web.py
+```
+
+---
+
+## Default Login
+
+```text
+Username: Admin
+Password: DHCPManager!
+```
+
+Change the default credentials and Flask secret key in `config.py` before production use.
+
+---
+
+## Web Usage
+
+Start the web interface:
+
+```bash
+sudo python3 web.py
+```
+
+Then open:
+
+```text
+http://<dhcp-manager-ip>:5000
+```
+
+Use the UI to:
+
+- add DHCP reservations
+- edit existing reservations
+- remove reservations
+- assign PXE/iPXE Boot Device profiles
+- initialize DHCP/TFTP/PXE setup through the wizard
+
+---
+
+## CLI Usage
 
 ```bash
 # List all DHCP entries
-./cli.py list
+sudo ./cli.py list
 
-# Add a new entry
-./cli.py add --hostname server1 --mac aa:bb:cc:dd:ee:ff --ip 192.168.1.10
+# Add a reservation
+sudo ./cli.py add --hostname server1 --mac aa:bb:cc:dd:ee:ff --ip 192.168.1.10
 
 # Query an entry
-./cli.py query server1
+sudo ./cli.py query server1
 
 # Modify an entry
-./cli.py modify server1 --ip 192.168.1.20
+sudo ./cli.py modify server1 --ip 192.168.1.20
 
 # Remove an entry
-./cli.py remove server1
+sudo ./cli.py remove server1
 ```
 
+---
 
+## PXE and iPXE Boot Profiles
 
-## Dynamic PXE/iPXE boot profiles
-
-The existing legacy PXELINUX feature remains the source of truth for classic PXE clients: selecting a Boot Device creates or updates a per-client symlink under `pxelinux.cfg/<IP_HEX>`.
-
-The iPXE layer mirrors the same Boot Device choice using generated IP-specific scripts. One GUI selection updates both worlds because the tool cannot know in advance whether a machine will boot as legacy PXE or iPXE.
+The legacy PXELINUX layer remains the source of truth for classic BIOS PXE clients. Selecting a Boot Device creates or updates a per-client symlink under:
 
 ```text
-/var/lib/tftpboot/pxelinux.cfg/default          # existing PXELINUX menu
-/var/lib/tftpboot/pxelinux.cfg/centos-8.5      # auto-discovered GUI option
-/var/lib/tftpboot/pxelinux.cfg/debian          # auto-discovered GUI option
-/var/lib/tftpboot/pxelinux.cfg/hdd0            # auto-discovered once only
-/var/lib/tftpboot/pxelinux.cfg/hdd1            # auto-discovered once only
-/var/lib/tftpboot/pxelinux.cfg/C0A8010A -> centos-8.5
+/var/lib/tftpboot/pxelinux.cfg/<IP_HEX>
+```
 
-/var/lib/tftpboot/ipxe/ipxe.ipxe               # main dispatcher handed to iPXE clients
-/var/lib/tftpboot/ipxe/default.ipxe            # optional default iPXE profile/menu
-/var/lib/tftpboot/ipxe/rocky-9.ipxe            # optional native iPXE profile/menu
+The iPXE layer mirrors the same Boot Device choice by generating IP-specific scripts under:
+
+```text
+/var/lib/tftpboot/ipxe/clients/
+```
+
+This allows one GUI selection to support both legacy PXE and iPXE clients.
+
+Example layout:
+
+```text
+/var/lib/tftpboot/pxelinux.cfg/default
+/var/lib/tftpboot/pxelinux.cfg/rocky-9
+/var/lib/tftpboot/pxelinux.cfg/debian
+/var/lib/tftpboot/pxelinux.cfg/hdd0
+/var/lib/tftpboot/pxelinux.cfg/C0A8010A -> rocky-9
+
+/var/lib/tftpboot/ipxe/ipxe.ipxe
+/var/lib/tftpboot/ipxe/default.ipxe
+/var/lib/tftpboot/ipxe/rocky-9.ipxe
 /var/lib/tftpboot/ipxe/clients/192.168.1.10.ipxe
 ```
 
-### iPXE flow
+---
 
-1. Normal PXE firmware receives `undionly.kpxe` for BIOS or `ipxe.efi` for UEFI.
-2. Once iPXE starts and asks DHCP again, DHCP gives it `ipxe/ipxe.ipxe`.
-3. `ipxe/ipxe.ipxe` runs `dhcp`, then tries the generated IP-specific script:
+## iPXE Flow
+
+1. PXE firmware receives an iPXE binary:
+   - BIOS: `undionly.kpxe`
+   - UEFI: `ipxe.efi` or `snponly.efi`
+
+2. iPXE starts and asks DHCP again.
+
+3. DHCP detects iPXE and serves:
+
+   ```text
+   ipxe/ipxe.ipxe
+   ```
+
+4. The dispatcher tries the client-specific script first:
 
    ```ipxe
    chain --replace http://<dhcp-manager>:5000/ipxe/clients/${ip}.ipxe || goto try_default
-   chain --replace http://<dhcp-manager>:5000/ipxe/default.ipxe || goto local_disk
-   sanboot --no-describe --drive 0x80
    ```
 
-4. If no IP/default iPXE file exists, the client boots local disk 0.
+5. If no client script exists, it tries the default iPXE profile:
 
-### Dynamic Boot Device drop-down
+   ```ipxe
+   chain --replace http://<dhcp-manager>:5000/ipxe/default.ipxe || goto local_disk
+   ```
 
-The web GUI discovers Boot Device choices dynamically from:
+6. If no iPXE profile exists, it boots local disk.
 
-- regular non-symlink files under `pxelinux.cfg`, for example `default`, `centos-8.5`, `debian`, `hdd0`, `hdd1`, `rocky-9`
-- regular top-level files under `ipxe`, for example `default.ipxe`, `rocky-9.ipxe`
+---
 
-Generated client files under `ipxe/clients/` and PXELINUX IP symlinks are intentionally hidden. Local disk aliases are de-duplicated, so `hdd0` and `hdd1` appear once.
+## Dynamic Boot Device Discovery
 
-### PXELINUX to iPXE translation
+The web UI discovers Boot Device options from:
 
-When a selected Boot Device exists only as `pxelinux.cfg/<profile>`, DHCP Manager parses common PXELINUX Linux entries and generates an iPXE equivalent for the client. It reuses the same `KERNEL`/`LINUX`, `INITRD`, and `APPEND initrd=...` paths, loading them by TFTP. Native top-level `ipxe/<profile>.ipxe` files take precedence when present.
+- regular non-symlink files under `pxelinux.cfg/`
+- regular top-level `.ipxe` files under `ipxe/`
+
+Generated client files are hidden:
+
+```text
+ipxe/clients/*.ipxe
+pxelinux.cfg/<IP_HEX> symlinks
+```
+
+Local disk aliases such as `hdd0` and `hdd1` are de-duplicated in the UI.
+
+---
+
+## PXELINUX-to-iPXE Translation
+
+If a selected Boot Device exists only as a PXELINUX profile, DHCP Manager parses common Linux boot entries and generates an iPXE equivalent for that client.
 
 Supported common PXELINUX shape:
 
 ```text
 DEFAULT install
 LABEL install
-  KERNEL images/centos-8.5/vmlinuz
-  APPEND initrd=images/centos-8.5/initrd.img inst.repo=http://mirror/centos/8.5 quiet
+  KERNEL images/rocky/vmlinuz
+  INITRD images/rocky/initrd.img
+  APPEND inst.repo=http://mirror/rocky quiet
 ```
 
-Useful translation commands:
+Preview generated iPXE syntax:
 
 ```bash
-# Preview generated iPXE syntax from pxelinux.cfg/centos-8.5
-./cli.py ipxe translate centos-8.5
-
-# Write a reusable native profile to /var/lib/tftpboot/ipxe/centos-8.5.ipxe
-sudo ./cli.py ipxe translate centos-8.5 --write
+./cli.py ipxe translate rocky-9
 ```
 
-### Configure iPXE support
+Write a reusable native iPXE profile:
+
+```bash
+sudo ./cli.py ipxe translate rocky-9 --write
+```
+
+Native files under `ipxe/<profile>.ipxe` take precedence over translated PXELINUX profiles.
+
+---
+
+## Configure iPXE Support
 
 Edit `config.py`:
 
@@ -183,280 +328,255 @@ Edit `config.py`:
 IPXE_HTTP_BASE_URL = "http://<dhcp-manager-ip>:5000"
 ```
 
-Install the main dispatcher into the TFTP iPXE directory:
+Install the main iPXE dispatcher:
 
 ```bash
 sudo ./cli.py ipxe install-default
 ```
 
-Print the DHCP snippet and paste it inside the relevant ISC DHCP `subnet` or `shared-network` block:
+Show the DHCP snippet:
 
 ```bash
 ./cli.py ipxe snippet
 ```
 
-Validate and restart DHCP:
+Paste the snippet into the relevant ISC DHCP `subnet` or `shared-network` block, then validate and restart DHCP.
+
+Ubuntu/Debian:
 
 ```bash
 sudo dhcpd -t -cf /etc/dhcp/dhcpd.conf
 sudo systemctl restart isc-dhcp-server
 ```
 
-### Useful CLI commands
+Rocky/RHEL/Fedora:
 
 ```bash
-# Show dynamically discovered boot profiles
+sudo dhcpd -t -cf /etc/dhcp/dhcpd.conf
+sudo systemctl restart dhcpd
+```
+
+---
+
+## Useful iPXE CLI Commands
+
+```bash
+# Show discovered boot profiles
 ./cli.py ipxe profiles
 
-# Set both legacy PXELINUX symlink and IP-specific iPXE override
+# Set both PXELINUX symlink and iPXE client override
 sudo ./cli.py boot 192.168.1.10 rocky-9
 
-# Create/update only the generated IP-specific iPXE file
+# Create/update only the generated iPXE client file
 sudo ./cli.py ipxe set-client 192.168.1.10 rocky-9
 
-# List/remove generated iPXE client files
+# List generated iPXE client files
 ./cli.py ipxe list-clients
+
+# Remove a generated iPXE client file
 sudo ./cli.py ipxe delete-client 192.168.1.10
 ```
 
-## 🔧 Configuration
+---
 
-Edit `config.py` to customize paths and settings:
+## Configuration
 
-```python
-@dataclass
-class DHCPConfig:
-    # DHCP Configuration
-    DHCP_CONF: Path = Path("/etc/dhcp/dhcpd.conf")
-    DHCP_BACKUP: Path = Path("/etc/dhcp/dhcpd.conf.bak")
-    
-    # PXE Boot Configuration
-    TFTP_BASE_DIR: Path = Path("/var/lib/tftpboot/pxelinux.cfg")
-    
-    # Flask Configuration
-    FLASK_HOST: str = "0.0.0.0"
-    FLASK_PORT: int = 5000
-    FLASK_DEBUG: bool = False  # Set False in production!
+Main settings are in:
+
+```text
+config.py
 ```
 
-## 🧪 Testing
+Common values to review:
+
+```python
+DHCP_CONF = Path("/etc/dhcp/dhcpd.conf")
+DHCP_BACKUP = Path("/etc/dhcp/dhcpd.conf.bak")
+
+TFTP_BASE_DIR = Path("/var/lib/tftpboot/pxelinux.cfg")
+
+FLASK_HOST = "0.0.0.0"
+FLASK_PORT = 5000
+FLASK_DEBUG = False
+
+FLASK_SECRET_KEY = "change-this-in-production"
+
+IPXE_HTTP_BASE_URL = "http://<dhcp-manager-ip>:5000"
+```
+
+---
+
+## Testing
 
 ```bash
-# Run all tests
 python3 -m unittest tests/test_dhcp_manager.py
+```
 
-# Run with verbose output
+Verbose:
+
+```bash
 python3 tests/test_dhcp_manager.py
 ```
 
-## 🔒 Security Considerations
+---
 
-1. **Change the Flask secret key** in production:
-   ```python
-   # config.py
-   FLASK_SECRET_KEY: str = "your-secure-random-key-here"
-   ```
+## Security Notes
 
-2. **Disable debug mode** in production:
-   ```python
-   FLASK_DEBUG: bool = False
-   ```
+Before production use:
 
-3. **Use HTTPS** with a reverse proxy (nginx/Apache)
+1. Change the default admin credentials.
+2. Change `FLASK_SECRET_KEY`.
+3. Keep `FLASK_DEBUG = False`.
+4. Restrict access to the web UI using firewall rules or a reverse proxy.
+5. Use HTTPS if exposing the UI outside a trusted management network.
+6. Run with the minimum permissions possible, but note that DHCP/TFTP operations usually require root.
 
-4. **Restrict access** with firewall rules or authentication
+---
 
-5. **Run with appropriate permissions** - requires root for DHCP operations
+## Troubleshooting
 
-## 📝 API Documentation
+### DHCP service does not start
 
-### DHCPManager
+Validate the DHCP config:
 
-```python
-from managers.dhcp_manager import DHCPManager
-
-mgr = DHCPManager()
-
-# Add entry
-mgr.add_entry("server1", "aa:bb:cc:dd:ee:ff", "192.168.1.10")
-
-# Get all entries
-entries = mgr.get_all_entries()
-
-# Find specific entry
-entry = mgr.find_entry("192.168.1.10")
-
-# Modify entry
-mgr.modify_entry("server1", new_ip="192.168.1.20")
-
-# Remove entry
-mgr.remove_entry("server1")
+```bash
+sudo dhcpd -t -cf /etc/dhcp/dhcpd.conf
 ```
-
-### PXEBootManager
-
-```python
-from managers.pxe_manager import PXEBootManager
-
-pxe = PXEBootManager()
-
-# Set boot device
-pxe.create_boot_link("192.168.1.10", "hd0")
-
-# Get boot device
-device = pxe.get_boot_device("192.168.1.10")
-
-# Convert IP to hex
-hex_name = PXEBootManager.ip_to_hex("192.168.1.10")  # "C0A8010A"
-
-# Convert hex to IP
-ip = PXEBootManager.hex_to_ip("C0A8010A")  # "192.168.1.10"
-
-# Delete boot link
-pxe.delete_boot_link("192.168.1.10")
-```
-
-## 🐛 Troubleshooting
-
-### DHCP Service Won't Start
 
 Check logs:
+
 ```bash
-tail -f /var/log/dhcp_manager.log
-journalctl -u isc-dhcp-server -f
+sudo journalctl -u isc-dhcp-server -f
 ```
 
-Validate configuration manually:
+Rocky/RHEL/Fedora:
+
 ```bash
-dhcpd -t -cf /etc/dhcp/dhcpd.conf
+sudo journalctl -u dhcpd -f
 ```
 
-### Permission Errors
+### Permission errors
 
-Ensure the script runs with appropriate permissions:
+Run CLI or web operations with sudo:
+
 ```bash
 sudo ./cli.py list
-```
-
-Or use sudo for web interface:
-```bash
 sudo python3 web.py
 ```
 
-### PXE Boot Not Working
+### PXE boot fails
 
-Check TFTP directory permissions:
+Check TFTP files:
+
 ```bash
+ls -la /var/lib/tftpboot/
 ls -la /var/lib/tftpboot/pxelinux.cfg/
 ```
 
-Verify symlinks:
+Check PXELINUX symlinks:
+
 ```bash
-cd /var/lib/tftpboot/pxelinux.cfg/
-ls -l | grep -E '^l'
+find /var/lib/tftpboot/pxelinux.cfg -type l -ls
 ```
 
-## 📚 Development
+Check iPXE client scripts:
 
-### Adding New Features
+```bash
+ls -la /var/lib/tftpboot/ipxe/
+ls -la /var/lib/tftpboot/ipxe/clients/
+```
 
-1. **Add validation** in `utils/validators.py`
-2. **Add exceptions** in `exceptions.py` if needed
-3. **Implement logic** in appropriate manager class
-4. **Add tests** in `tests/`
-5. **Update CLI/Web** interfaces
+### Rocky/RHEL Syslinux files are under `/tftpboot`
 
-### Code Style
+On Rocky/RHEL/Fedora, `syslinux-tftpboot` may install PXELINUX files under:
 
-- Follow PEP 8
-- Use type hints
-- Document with docstrings
-- Keep functions focused (Single Responsibility)
-- Handle errors explicitly
+```text
+/tftpboot/
+```
 
-## 🤝 Contributing
+Your managed TFTP root can still remain:
 
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass
-5. Submit a pull request
+```text
+/var/lib/tftpboot/
+```
 
-## 📄 License
+The setup wizard can copy the required files from `/tftpboot/` into the managed TFTP root.
 
-[Your License Here]
+### iPXE binaries are missing
 
-## 👥 Authors
+This is expected if only Syslinux packages were installed.
 
-- Original: [Original Author]
-- Refactored: [Your Name]
+These files are iPXE binaries, not Syslinux files:
 
-## 🙏 Acknowledgments
+```text
+undionly.kpxe
+ipxe.efi
+snponly.efi
+```
 
-- ISC DHCP Server project
-- Flask framework
+Install or build iPXE separately, or let the project installer/dispatcher workflow place them where expected.
+
+---
+
+## Development Notes
+
+When adding features:
+
+1. Add validation in `utils/validators.py`.
+2. Add custom exceptions in `exceptions.py` when needed.
+3. Implement logic in the relevant manager class.
+4. Update CLI and/or Web interfaces.
+5. Add or update tests.
+6. Update this README.
+
+Code style:
+
+- follow PEP 8
+- use type hints
+- keep functions focused
+- handle errors explicitly
+- document public methods with docstrings
+
+---
+
+## Migration Notes
+
+This refactored version replaces older script-based behavior with Python manager classes.
+
+Main changes:
+
+- `dhcp_manager.py` was split into:
+  - `managers/dhcp_manager.py`
+  - `managers/pxe_manager.py`
+- `colors.py` moved to `utils/colors.py`
+- `logger.py` moved to `utils/logger.py`
+- `convert.sh` was replaced by:
+  - `PXEBootManager.ip_to_hex()`
+  - `PXEBootManager.hex_to_ip()`
+- `manage_links_from_ip.py` was replaced by:
+  - `PXEBootManager.create_boot_link()`
+  - `PXEBootManager.delete_boot_link()`
+
+Before migrating an existing host:
+
+```bash
+sudo cp /etc/dhcp/dhcpd.conf /etc/dhcp/dhcpd.conf.backup
+```
+
+Then test in a development environment before replacing a working DHCP server.
+
+---
+
+## Author
+
+Original project by Zohdi Mahameed.
+
+---
+
+## Acknowledgments
+
+- ISC DHCP Server
+- Syslinux / PXELINUX
+- iPXE
+- Flask
 - Python community
-
----
-
-## Migration Guide (From Old Version)
-
-### What Changed
-
-1. **File Structure**
-   - `dhcp_manager.py` → Split into `managers/dhcp_manager.py` and `managers/pxe_manager.py`
-   - `colors.py` → Moved to `utils/colors.py`
-   - `logger.py` → Moved to `utils/logger.py`
-   - Added: `config.py`, `exceptions.py`, `utils/validators.py`
-
-2. **Imports**
-   ```python
-   # Old
-   from dhcp_manager import DHCPManager
-   from colors import green, red
-   
-   # New
-   from managers.dhcp_manager import DHCPManager
-   from utils.colors import green, red
-   ```
-
-3. **External Scripts**
-   - `convert.sh` functionality → `PXEBootManager.ip_to_hex()` / `hex_to_ip()`
-   - `manage_links_from_ip.py` → `PXEBootManager.create_boot_link()` / `delete_boot_link()`
-
-### Migration Steps
-
-1. **Backup your data**
-   ```bash
-   sudo cp /etc/dhcp/dhcpd.conf /etc/dhcp/dhcpd.conf.backup
-   ```
-
-2. **Update imports** in any custom scripts
-
-3. **Replace external script calls** with new Python methods
-
-4. **Test thoroughly** in a development environment first
-
-5. **Update systemd services** if applicable
-
----
-
-**For questions or issues, please open a GitHub issue or contact the maintainers.**
-
-## First-run Setup Wizard
-
-This package includes a first-run setup wizard for fresh installations. On a new host, run:
-
-```bash
-sudo python3 web.py
-```
-
-Then open the web UI on port `5000`. If DHCP/TFTP/PXE setup is not completed, the app redirects to `/setup/checks` instead of the login page. The wizard can install required packages, configure the DHCP interface, generate DHCP/TFTP config, copy PXELINUX files, and create the default TFTP tree.
-
-For development without system setup redirection:
-
-```bash
-DHCP_MANAGER_SKIP_SETUP=1 python3 web.py
-```
-
-See `SETUP_WIZARD.md` for details.
