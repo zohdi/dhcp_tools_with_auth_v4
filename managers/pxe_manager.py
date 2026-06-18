@@ -744,6 +744,7 @@ class PXEBootManager:
         try:
             if path.exists():
                 path.unlink()
+                os.remove(path)
                 self.logger.info("Deleted client iPXE script: %s", path)
         except OSError as exc:
             raise PXEBootError(f"Failed to delete client iPXE script {path}: {exc}") from exc
