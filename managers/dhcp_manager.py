@@ -468,6 +468,7 @@ class DHCPManager:
         try:
             pxe_manager = PXEBootManager()
             pxe_manager.delete_boot_link(entry["ip"])
+            pxe_manager.delete_client_ipxe_script(entry["ip"])
         except Exception as e:
             self.logger.warning(f"Failed to remove PXE boot link: {e}")
         
