@@ -15,7 +15,7 @@ The project manages ISC DHCP configuration, DHCP host reservations, classic PXEL
 - iPXE dispatcher support using per-client scripts under `ipxe/clients/`
 - Dynamic Boot Device discovery from PXELINUX and iPXE profiles
 - PXELINUX-to-iPXE translation for common Linux installer entries
-- Centralized configuration in `config.py`
+- Centralized, environment-variable-driven configuration in `config.py`
 - Input validation, custom exceptions, structured logging, and unit tests
 
 ---
@@ -24,14 +24,15 @@ The project manages ISC DHCP configuration, DHCP host reservations, classic PXEL
 
 ```text
 dhcp_manager/
-├── config.py                    # Centralized configuration
+├── config.py                    # Centralized configuration (env-var overridable)
 ├── exceptions.py                # Custom exception classes
 ├── cli.py                       # Command-line interface
 ├── web.py                       # Flask web interface
+├── debug_boot_devices.py        # Standalone troubleshooting script
+├── requirements.txt             # Python dependencies
 │
 ├── setup_wizard/                # First-run DHCP/TFTP/PXE setup wizard
 │   ├── __init__.py
-│   ├── files/
 │   └── manager.py
 │
 ├── managers/
@@ -47,12 +48,18 @@ dhcp_manager/
 │
 ├── templates/
 │   ├── layout.html
+│   ├── login.html
 │   ├── index.html
-│   └── add_edit.html
+│   ├── add_edit.html
+│   ├── setup_checks.html
+│   ├── setup_config.html
+│   ├── setup_review.html
+│   └── setup_done.html
 │
 └── tests/
     ├── __init__.py
-    └── test_dhcp_manager.py
+    ├── test_dhcp_manager.py
+    └── test_pxe_manager.py
 ```
 
 ---
@@ -71,34 +78,30 @@ sudo apt-get install -y isc-dhcp-server tftpd-hpa syslinux-common pxelinux pytho
 Rocky/RHEL/Fedora:
 
 ```bash
-sudo dnf install -y dhcp-server --releasever=9 # If using higher version since dhcp-server is deprecated 
-sudo dnf install tftp-server syslinux-tftpboot python3 python3-pip
+sudo dnf install -y dhcp-server --releasever=9 # If using a higher version since dhcp-server is deprecated
+sudo dnf install -y tftp-server syslinux-tftpboot python3 python3-pip
 ```
 
 > Note: `syslinux-tftpboot` provides PXELINUX/Syslinux files such as `pxelinux.0`, `menu.c32`, `ldlinux.c32`, and related `.c32` modules. It does not provide iPXE binaries such as `undionly.kpxe`, `ipxe.efi`, or `snponly.efi`.
 
 ### 2. Clone the project
 
-Main branch:
-
 ```bash
 cd /opt
-sudo git clone https://github.com/zohdi/dhcp_tools_with_auth_v4.git dhcp_manager
+sudo git clone https://github.com/zohdi/dhcp_pxe_web_manager.git dhcp_manager
 cd /opt/dhcp_manager
 ```
 
-Autodeploy branch:
+To use a specific branch:
 
 ```bash
-cd /opt
-sudo git clone -b autodeploy_web_dhcp https://github.com/zohdi/dhcp_tools_with_auth_v4.git dhcp_manager
-cd /opt/dhcp_manager
+sudo git clone -b <branch-name> https://github.com/zohdi/dhcp_pxe_web_manager.git dhcp_manager
 ```
 
 ### 3. Install Python dependencies
 
 ```bash
-sudo pip3 install flask bcrypt
+sudo pip3 install -r requirements.txt
 ```
 
 ### 4. Make scripts executable
@@ -112,6 +115,44 @@ Optional CLI symlink:
 ```bash
 sudo ln -s /opt/dhcp_manager/cli.py /usr/local/bin/dhcp-manager
 ```
+
+---
+
+## Configuration
+
+All settings live in `config.py` and can be overridden with environment variables — no need to edit the file directly in most deployments.
+
+| Setting | Environment variable | Default |
+|---|---|---|
+| DHCP config path | `DHCP_CONF` | `/etc/dhcp/dhcpd.conf` |
+| DHCP backup path | `DHCP_BACKUP` | `/etc/dhcp/dhcpd.conf.bak` |
+| DHCP service name | `DHCP_SERVICE` | `isc-dhcp-server` |
+| DNS service name | `BIND_SERVICE` | `bind9` |
+| TFTP/PXELINUX dir | `TFTP_BASE_DIR` | `/var/lib/tftpboot/pxelinux.cfg` |
+| iPXE base URL | `IPXE_HTTP_BASE_URL` | `http://127.0.0.1:5000` |
+| Flask bind host | `FLASK_HOST` | `0.0.0.0` |
+| Flask bind port | `FLASK_PORT` | `5000` |
+| Flask debug mode | `FLASK_DEBUG` | `false` |
+| Flask secret key | `FLASK_SECRET_KEY` | **must be changed** |
+| Admin username | `ADMIN_USERNAME` | `Admin` |
+| Admin password hash | `ADMIN_PASSWORD_HASH` | **must be changed** |
+
+### Setting a real admin password
+
+Generate a bcrypt hash for your chosen password:
+
+```bash
+python3 -c "import bcrypt; print(bcrypt.hashpw(b'your-new-password', bcrypt.gensalt()).decode())"
+```
+
+Then export it (or put it in a systemd unit / `.env` file your process manager loads):
+
+```bash
+export ADMIN_PASSWORD_HASH='$2b$12$...'
+export FLASK_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+```
+
+**Never commit real credentials, secret keys, or API keys to the repository.** See [Security Notes](#security-notes) below.
 
 ---
 
@@ -151,16 +192,7 @@ For development without setup redirection:
 DHCP_MANAGER_SKIP_SETUP=1 python3 web.py
 ```
 
----
-
-## Default Login
-
-```text
-Username: Admin
-Password: DHCPManager!
-```
-
-Change the default credentials and Flask secret key in `config.py` before production use.
+See [SETUP_WIZARD.md](SETUP_WIZARD.md) for full wizard details.
 
 ---
 
@@ -322,10 +354,10 @@ Native files under `ipxe/<profile>.ipxe` take precedence over translated PXELINU
 
 ## Configure iPXE Support
 
-Edit `config.py`:
+Set the base URL clients will use to reach this app:
 
-```python
-IPXE_HTTP_BASE_URL = "http://<dhcp-manager-ip>:5000"
+```bash
+export IPXE_HTTP_BASE_URL="http://<dhcp-manager-ip>:5000"
 ```
 
 Install the main iPXE dispatcher:
@@ -379,43 +411,13 @@ sudo ./cli.py ipxe delete-client 192.168.1.10
 
 ---
 
-## Configuration
-
-Main settings are in:
-
-```text
-config.py
-```
-
-Common values to review:
-
-```python
-DHCP_CONF = Path("/etc/dhcp/dhcpd.conf")
-DHCP_BACKUP = Path("/etc/dhcp/dhcpd.conf.bak")
-
-TFTP_BASE_DIR = Path("/var/lib/tftpboot/pxelinux.cfg")
-
-FLASK_HOST = "0.0.0.0"
-FLASK_PORT = 5000
-FLASK_DEBUG = False
-
-FLASK_SECRET_KEY = "change-this-in-production"
-
-IPXE_HTTP_BASE_URL = "http://<dhcp-manager-ip>:5000"
-```
-
----
-
 ## Testing
 
-```bash
-python3 -m unittest tests/test_dhcp_manager.py
-```
-
-Verbose:
+This project uses `pytest`:
 
 ```bash
-python3 tests/test_dhcp_manager.py
+pip3 install pytest
+pytest tests/
 ```
 
 ---
@@ -424,12 +426,20 @@ python3 tests/test_dhcp_manager.py
 
 Before production use:
 
-1. Change the default admin credentials.
-2. Change `FLASK_SECRET_KEY`.
-3. Keep `FLASK_DEBUG = False`.
-4. Restrict access to the web UI using firewall rules or a reverse proxy.
-5. Use HTTPS if exposing the UI outside a trusted management network.
-6. Run with the minimum permissions possible, but note that DHCP/TFTP operations usually require root.
+1. **Set `ADMIN_PASSWORD_HASH` and `FLASK_SECRET_KEY` via environment variables** — do not leave the repository defaults in place, and never commit real values to source control.
+2. Keep `FLASK_DEBUG` unset or `false`.
+3. Restrict access to the web UI using firewall rules or a reverse proxy.
+4. Use HTTPS if exposing the UI outside a trusted management network.
+5. Run with the minimum permissions possible, but note that DHCP/TFTP operations usually require root.
+6. **Rotate any credentials or API keys that were ever committed to this repository's history**, even after deleting the file — git history retains old blobs unless it is rewritten (see below).
+
+### Note on repository history
+
+An earlier commit in this repository included a plaintext file (`mailgun_api`) containing what appears to be a live API key. That file has been removed from this cleaned snapshot, but **removing a file does not remove it from git history**. If this repository has ever been pushed publicly:
+
+1. Treat that key as compromised and rotate/revoke it with the provider immediately.
+2. Scrub it from history with `git filter-repo` or BFG Repo-Cleaner before any further public push.
+3. Add a pre-commit secret scanner (e.g. `gitleaks`, `trufflehog`) going forward — `.gitignore` only prevents *new* commits, it does nothing for files already tracked.
 
 ---
 
@@ -539,39 +549,9 @@ Code style:
 
 ---
 
-## Migration Notes
-
-This refactored version replaces older script-based behavior with Python manager classes.
-
-Main changes:
-
-- `dhcp_manager.py` was split into:
-  - `managers/dhcp_manager.py`
-  - `managers/pxe_manager.py`
-- `colors.py` moved to `utils/colors.py`
-- `logger.py` moved to `utils/logger.py`
-- `convert.sh` was replaced by:
-  - `PXEBootManager.ip_to_hex()`
-  - `PXEBootManager.hex_to_ip()`
-- `manage_links_from_ip.py` was replaced by:
-  - `PXEBootManager.create_boot_link()`
-  - `PXEBootManager.delete_boot_link()`
-
-Before migrating an existing host:
-
-```bash
-sudo cp /etc/dhcp/dhcpd.conf /etc/dhcp/dhcpd.conf.backup
-```
-
-Then test in a development environment before replacing a working DHCP server.
-
----
-
 ## Author
 
 Original project by Zohdi Mahameed.
-
----
 
 ## Acknowledgments
 

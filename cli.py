@@ -133,8 +133,6 @@ def handle_ipxe_list_profiles(mgr: DHCPManager, args: argparse.Namespace) -> Non
         print()
 
 
-
-
 def handle_ipxe_translate(mgr: DHCPManager, args: argparse.Namespace) -> None:
     """Translate a PXELINUX profile into iPXE syntax."""
     pxe_mgr = PXEBootManager()
@@ -147,6 +145,7 @@ def handle_ipxe_translate(mgr: DHCPManager, args: argparse.Namespace) -> None:
         print(green(f"✓ Wrote translated iPXE profile: {path}"))
     else:
         print(script)
+
 
 def handle_ipxe_list_mac(mgr: DHCPManager, args: argparse.Namespace) -> None:
     """Backward-compatible list helper."""

@@ -66,8 +66,6 @@ def safe_execute(func, *args, **kwargs) -> Tuple[bool, Any]:
         return False, str(e)
 
 
-
-
 # ============================================================
 #                   FIRST-RUN SETUP WIZARD
 # ============================================================
@@ -199,7 +197,7 @@ def login():
         username = (request.form.get("username") or "").strip()
         password = request.form.get("password") or ""
 
-        if username == config.ADMIN_USERNAME and check_admin_password(password): #password == config.ADMIN_PASSWORD:
+        if username == config.ADMIN_USERNAME and check_admin_password(password):
             session.clear()
             session["role"] = "admin"
             session["username"] = username
